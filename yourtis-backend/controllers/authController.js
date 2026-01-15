@@ -1,77 +1,73 @@
-const User = require("../models/userModel");
-const bcrypt = require("bcryptjs"); // Library untuk enkripsi password
+const db = require("../config/database");
 
-// LOGIKA REGISTRASI
-exports.register = (req, res) => {
-  const { username, email, password, role, no_hp, alamat } = req.body;
+// --- 1. LOGIN ---
+exports.login = (req, res) => {
+  console.log("--- REQUEST LOGIN ---");
+  console.log("Body:", req.body);
 
-  // 1. Validasi Input Sederhana
-  if (!username || !email || !password || !role) {
-    return res.status(400).json({ message: "Semua field wajib diisi!" });
-  }
+  const { email, password } = req.body;
 
-  // 2. Enkripsi Password (Sesuai SRS 5.3 Safety Req)
-  const hashedPassword = bcrypt.hashSync(password, 8);
+  // Query cek email & password
+  const query = "SELECT * FROM tb_user WHERE email = ? AND password = ?";
 
-  const newUser = {
-    username,
-    email,
-    password: hashedPassword,
-    role,
-    no_hp,
-    alamat,
-  };
-
-  // 3. Simpan ke Database
-  User.create(newUser, (err, result) => {
+  db.query(query, [email, password], (err, results) => {
     if (err) {
-      // Cek jika email sudah ada (Error duplicate entry)
-      if (err.code === "ER_DUP_ENTRY") {
-        return res.status(400).json({ message: "Email sudah terdaftar!" });
-      }
-      return res
-        .status(500)
-        .json({ message: "Gagal mendaftar user.", error: err });
+      console.error("ERROR LOGIN DB:", err);
+      return res.status(500).json({ message: "Database Error", error: err });
     }
-    res.status(201).json({
-      message: "Registrasi Berhasil!",
-      userId: result.insertId,
-    });
+
+    if (results.length > 0) {
+      // Login Sukses
+      const user = results[0];
+      console.log("Login Sukses:", user.username);
+      res.status(200).json({
+        message: "Login Berhasil",
+        data: user,
+      });
+    } else {
+      // Login Gagal
+      console.log("Login Gagal: Email/Password salah");
+      res.status(401).json({ message: "Email atau kata sandi salah" });
+    }
   });
 };
 
-// LOGIKA LOGIN
-exports.login = (req, res) => {
-  const { email, password } = req.body;
+// --- 2. REGISTER ---
+exports.register = (req, res) => {
+  console.log("--- REQUEST REGISTER ---");
+  console.log("Body:", req.body);
 
-  // 1. Cari User berdasarkan Email
-  User.findByEmail(email, (err, user) => {
-    if (err)
-      return res.status(500).json({ message: "Terjadi kesalahan server." });
+  const { username, email, password, role, no_hp, alamat } = req.body;
 
-    // 2. Jika user tidak ditemukan
-    if (!user) {
-      return res.status(404).json({ message: "Email tidak ditemukan." });
+  // 1. Cek apakah email sudah ada?
+  const checkQuery = "SELECT * FROM tb_user WHERE email = ?";
+  db.query(checkQuery, [email], (err, results) => {
+    if (err) {
+      console.error("ERROR CEK EMAIL:", err);
+      return res.status(500).json({ message: "Database Error", error: err });
     }
 
-    // 3. Cek Password (Bandingkan password input vs password database)
-    const passwordIsValid = bcrypt.compareSync(password, user.password);
-    if (!passwordIsValid) {
-      return res.status(401).json({ message: "Password salah!" });
+    if (results.length > 0) {
+      console.log("Register Gagal: Email sudah ada");
+      return res.status(400).json({ message: "Email sudah digunakan" });
     }
 
-    // 4. Login Sukses - Kirim data user (tanpa password)
-    // Sesuai SRS REQ-AUTH-02, respon ini nanti dipakai Android untuk navigasi (Admin vs Pembeli)
-    res.json({
-      message: "Login Berhasil",
-      user: {
-        id_user: user.id_user,
-        username: user.username,
-        email: user.email,
-        role: user.role, // Penting untuk filter dashboard di Android
-        no_hp: user.no_hp,
-        alamat: user.alamat,
-      },
+    // 2. Jika email belum ada, Lakukan Insert
+    const insertQuery =
+      "INSERT INTO tb_user (username, email, password, role, no_hp, alamat) VALUES (?, ?, ?, ?, ?, ?)";
+    const values = [username, email, password, role, no_hp, alamat];
+
+    db.query(insertQuery, values, (err, result) => {
+      if (err) {
+        console.error("ERROR INSERT USER:", err.sqlMessage);
+        return res
+          .status(500)
+          .json({ message: "Gagal Mendaftar", error: err.sqlMessage });
+      }
+      console.log("Register Berhasil, ID:", result.insertId);
+      res
+        .status(201)
+        .json({ message: "Registrasi Berhasil", id: result.insertId });
     });
   });
 };
